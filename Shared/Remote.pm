@@ -1,7 +1,7 @@
 use strict;
 use warnings;
 use vars qw($VERSION);
-$VERSION = "0.15";
+$VERSION = "0.17";
 
 package Net::Shared::Remote;
 use IO::Socket;

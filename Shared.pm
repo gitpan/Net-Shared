@@ -1,5 +1,5 @@
 package main;
-
+$VERSION = '0.17';
 use Net::Shared::Local;
 use Net::Shared::Remote;
 use Net::Shared::Handler;
@@ -13,29 +13,27 @@ __END__
 
 =head1 NAME
 
-Net::Shared - Net::Shared variables across processes that are either local or
-remote.
+Net::Shared - Shared variables across processes that are either local or remote.
 
 =head1 ABSTRACT
 
-Share data across Local and Remote processes.
+Share data across local and remote processes.
 
 =head1 SYNOPSIS
 
-=begin html
-<pre>
+=for html <pre><tt>
 use Net::Shared;
-
+<br>
 my $listen         = new Net::Shared::Handler;
-
+<br>
 my $new_shared     = new Net::Shared::Local
                                           (
                                            name=>"new_shared",
                                            accept=>['127.0.0.1','164.107.70.126']
                                           );
-
+<br>
 my $old_shared     = new Net::Shared::Local (name=>"old_shared");
-
+<br>
 my $remote_shared  = new Net::Shared::Remote
                                            (
                                             name=>"remote_shared",
@@ -43,9 +41,9 @@ my $remote_shared  = new Net::Shared::Remote
                                             port=>$new_shared->port,
                                             address=>'127.0.0.1'
                                            );
-
+<br>
 $listen->add(\$new_shared, \$old_shared, \$remote_shared);
-
+<br>
 $listen->store($new_shared, "One ");
 print $listen->retrieve($new_shared);
 $listen->store($old_shared, "two ");
@@ -54,18 +52,22 @@ $listen->store($old_shared, [qw(three four)]);
 print @{$listen->retrieve($old_shared)};
 $listen->store($remote_shared, " and five.");
 print $listen->retrieve($remote_shared);
-
+<br>
 $listen->destroy_all;
-</pre>
-=end html
+<br>
+</tt></pre>
 
 =head1 DESCRIPTION
 
-I<Net::Shared> gives you the ability to share variables across processes that are either local or remote.  No functions are exported by Net::Shared; the interface is entirely OO. C<Net::Shared::Local> and C<Net::Shared::Remote> objects are created and interfaced with a C<Net::Shared::Handler> object.  Here is a description of the objects:
+B<Net::Shared> gives you the ability to share variables across processes that are either local or
+remote.  No functions are exported by Net::Shared; the interface is entirely OO.
+C<Net::Shared::Local> and C<Net::Shared::Remote> objects are created and interfaced with a
+C<Net::Shared::Handler> object.  Here is a description of the objects:
 
 =head2 Net::Shared
 
-Net::Shared itself is just a holder module.  Using it will bring in Net::Shared::Local, Net::Shared::Remote, and Net::Shared::Handler.  Just use it.
+Net::Shared itself is just a holder module.  Using it will bring in Net::Shared::Local,
+Net::Shared::Remote, and Net::Shared::Handler.  Just use it.
 
 =head2 Net::Shared::Local
 
@@ -163,7 +165,7 @@ spew out all sorts of possibly useful info.
 
 There are no methods that you can access with C<Net::Shared::Remote>.
 
-=head1 Net::Shared::Handler
+=head2 Net::Shared::Handler
 
 C<Net::Shared::Handler> is the object with which you will use to interface
 with C<Net::Shared::Local> and C<Net::Shared::Remote> objects.  You can think of
