@@ -64,7 +64,7 @@ sub store
                                      Proto    => 'tcp',
                                      PeerAddr => $address,
                                      PeerPort => $$var->{port}
-                                   ) or croak ( $self->cleanup($!) );
+                                   ) or croak( $self->cleanup($!) );
 
     $send->autoflush(1);
 
@@ -77,9 +77,9 @@ sub store
         print "\tLocalport: ", $send->sockport, "\n\n";
     }
 
-    my $header = crypt(crypt($$var->{ref},$$var->{ref}),$$var->{ref});
-    my $serialized_data = freeze(\$data);
-    $serialized_data = join('*',map(ord,split(//,$serialized_data)));
+    my $header = $$var->build_header;
+    my $serialized_data = $$var->prepare_data(\$data);
+
     my $bytes = syswrite($send, $header.$serialized_data, length($serialized_data) + length($header));
     $send->close;
     return $bytes;
@@ -112,9 +112,10 @@ sub retrieve
         print "\tLocalport: ", $message->sockport, "\n\n";
     }
 
-    my $header = crypt(crypt($$var->{ref},$$var->{ref}),$$var->{ref});
-    syswrite($message, $header."\bl\b", 3+length($header));
+    my $header = $$var->build_header;
+    syswrite($message, $header.$$var->{response}, length($$var->{response})+length($header));
     $message->close;
+
     $message = IO::Socket::INET->new
                                  (
                                   Listen    => SOMAXCONN,
@@ -127,10 +128,8 @@ sub retrieve
         print "Listening for ", $$var->{ref}, ":\n";
         print "\tLocalport: ",  $message->sockport, "\n\n";
     }
-
     while (my $connection = $message->accept)
     {
-
         if ($$var->{debug})
         {
             print "Recieved a connection from ", $$var->{ref}, ":\n";
@@ -141,32 +140,30 @@ sub retrieve
         }
 
         my $sent = <$connection>;
-        $connection->close if $connection;
-        $sent = join('',map(chr,split(/\*/,$sent)));
-        $sent = thaw($sent);
+        $connection->close if $connection->connected;
         $message->close;
-        return $$sent;
+        return $self->inflate_data($sent);
     }
-    $message->close if $message;
+    $message->close if $message->connected;
 }
 
 sub set_remote_port
 {
     my ($self, $var, $port) = shift;
-    $$var->set_port ($port);
+    $$var->set_port($port);
 }
 
 sub set_remote_addr
 {
     my ($self, $var, $addr) = shift;
-    $$var->set_addr ($addr);
+    $$var->set_addr($addr);
 }
 
 sub destroy_all
 {
     my $self=shift;
     print "Destroying variables: \n" if $self->{debug};
-    while ( my($key,$value) = each(%{$self->{vars}}) )
+    while ( my($key,$value) = each(%{$self->{vars}}))
     {
         my $temp = $$value->{name}.$$value->{ref};
         my $temp1 = $$value->{debug} if $self->{debug};
@@ -177,6 +174,14 @@ sub destroy_all
     print "\n" if $self->{debug};
 }
 
+sub inflate_data
+{
+    my ($self,$data) = @_;
+    $data = join('',map(chr,split(/\*/,$data)));
+    $data = thaw($data);
+    return $$data;
+}
+
 sub DESTROY
 {
     my $self = shift;
@@ -184,61 +189,3 @@ sub DESTROY
 }
 
 "JAPH";
-
-__END__
-
-=pod
-
-=head1 NAME
-Net::Shared::Handler
-
-=head1 DESCRIPTION
-
-C<Net::Shared::Handler> is the object with which you will use to interface
-with C<Net::Shared::Local> and C<Net::Shared::Remote> objects.  You can think of
-C<Net::Shared::Handler> as the class that actually all of the work: storing
-the data, retrieving the data, and managing the objects.  It has 5 methods
-available for you to use: add, remove, store, retrieve, and destroy_all
-(see method descriptions below for more info).  New accepts 1 argument,
-and when set to a true value debugging is turned on (only for the
-Handler object, however).  Methods:
-
-=over 3
-
-=item C<add(@list)>
-
-Adds a list of C<Net::Shared::Local> / C<Net::Shared::Remote> objects so that they
-can be "managed."  Nothing (storing/retrieving/etc) can be done with the
-objects until they have been added, so don't forget to do it!
-
-=item C<remove(@list)>
-
-Remove effectively kills any objects in C<@list> and all data in them, as
-well as remove them from the management scheme.
-
-=item C<store($object, \$data)>
-
-Stores the data in C<$object>, whether it be a C<Net::Shared::Local> object or
-C<Net::Shared::Remote> object.  The data needs to be a reference so that it can
-be serialized and shipped away.  Returns the number of bytes sent.
-
-=item C<retrieve($object)>
-
-Grabs the data out of C<$object>, and returns the value.  Note that it
-will be the derefferenced value of the data that you stored (in other words,
-you pass C<\$data> to store, and retrieve returns C<$data>).
-
-=item C<destroy_all()>
-
-Your standard janitorial method.  Call it at the end of every program in
-which you use I<Net::Shared>, or else you will have legions of zombie process
-lurking, waiting to eat you and your children...
-
-=back
-
-=head1 MORE
-
-See Net::Shared's pod for more info.
-
-=cut
-

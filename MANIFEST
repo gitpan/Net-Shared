@@ -3,6 +3,10 @@ Makefile.PL
 MANIFEST
 README
 test.pl
+examples/local.pl
+examples/ssrpt_s.pl
+examples/ssrpt_c.pl
+examples/fork_ex.pl
 Shared.pm
 Shared/Local.pm
 Shared/Remote.pm

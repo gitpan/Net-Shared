@@ -5,17 +5,19 @@ $VERSION = "0.17";
 
 package Net::Shared::Remote;
 use IO::Socket;
+use Storable qw(freeze thaw);
 
 sub new
 {
     my ($proto, %config) = @_;
     my $class = ref($proto) || $proto;
     my $self  = {};
-    $self->{name}    = crypt($config{name}, $config{name});
-    $self->{ref}     = $config{ref};
-    $self->{port}    = exists($config{port})    ? $config{port}    : 0;
-    $self->{address} = exists($config{address}) ? $config{address} : '127.0.0.1';
-    $self->{debug}   = exists($config{debug})   ? $config{name}    : 0;
+    $self->{name}     = crypt($config{name}, $config{name});
+    $self->{ref}      = $config{ref};
+    $self->{port}     = exists($config{port})     ? $config{port}     : 0;
+    $self->{address}  = exists($config{address})  ? $config{address}  : '127.0.0.1';
+    $self->{debug}    = exists($config{debug})    ? $config{name}     : 0;
+    $self->{response} = exists($config{response}) ? $config{response} : "\bl\b";
 
     if ($config{debug})
     {
@@ -48,55 +50,24 @@ sub destroy_variable
     undef $self;
 }
 
+sub prepare_data
+{
+    my ($self,$data) = @_;
+    my $serialized_data = freeze($data);
+    return join('*',map{ord}split(//,$serialized_data));
+}
+
+sub build_header
+{
+    my $self = shift;
+    return crypt(crypt($self->{ref},$self->{ref}),$self->{ref});
+}
+
+sub cleanup
+{
+    my ($self, $error_value) = @_;
+    $self->destroy_variable;
+    return $error_value;
+}
+
 "JAPH";
-
-__END__
-
-=pod
-
-=head1 NAME
-
-Net::Shared::Remote
-
-=head1 DESCRIPTION
-
-C<Net::Shared::Remote> is basically a front end to accessing data stored by
-Shared::Local objects on remote machines.  C<Net::Shared::Remote> also takes
-a hash as an argument, similarily to C<Net::Shared::Local>.  However,
-C<Net::Shared::Remote> can take many more elements, and all of which are
-required (except debug).
-
-=over 3
-
-=item C<name>
-
-The name that you will be using to reference this object.
-
-=item C<ref>
-
-Ref will be the name of the Net::Shared::Local object on the machine that
-you are accessing.  You B<MUST> correctly specify ref (think of it as
-a "password") or you will be unable to access the data.
-
-=item C<address>
-
-The address of the machine where the data that you want to access is
-located.
-
-=item C<port>
-
-The port number where the data is stored on the machine which you are
-accessing
-
-=item C<debug>
-
-Set to a true value to turn on debuging for the object, which makes it
-spew out all sorts of possibly useful info.
-
-=back
-
-=head1 MORE
-
-See Net::Shared's pod for more info.
-
-=cut

@@ -13,7 +13,7 @@ sub REAPER
     my $waitedpid = wait;
     $SIG{CHLD} = \&REAPER;
 }
-$SIG{CHLD} = \&REAPER;
+local $SIG{CHLD} = \&REAPER;
 
 sub new
 {
@@ -21,31 +21,46 @@ sub new
 
     my $class = ref($proto) || $proto;
     my $self  = {};
+    bless ($self, $class);
 
-    $self->{debug}  = exists($config{debug}) ? $config{name} : 0;
-    $self->{name}   = crypt($config{name}, $config{name});
-    $self->{ref}    = $config{name};
-    $self->{data}   = ();
-    $self->{port}   = 0;
-    $self->{lock}   = 0;
+    $self->{debug}    = exists($config{debug}) ? $config{name} : 0;
+    $self->{response} = exists($config{response}) ? $config{response} : "\bl\b";
+    $self->{name}     = crypt($config{name}, $config{name});
+    $self->{ref}      = $config{name};
+    $self->{data}     = "";
+    $self->{port}     = 0;
+    $self->{lock}     = 0;
 
     $self->{accept} = defined(@{$config{accept}}) ? [@{$config{accept}}] : [qw(127.0.0.1)];
+    my $sock;
+    if (!exists($config{port}))
+    {
+        $sock = IO::Socket::INET->new
+                                     (
+                                      LocalAddr => 'localhost',
+                                      Listen    => SOMAXCONN,
+                                      Reuse     => 1,
+                                      Proto     => 'tcp'
+                                     );
 
-    my $sock = IO::Socket::INET->new
-                                 (
-                                  LocalAddr => 'localhost',
-                                  Listen    => SOMAXCONN,
-                                  Reuse     => 1,
-                                  Proto     => 'tcp'
-                                 );
+        $sock->sockopt (SO_REUSEADDR, 1);
+        $sock->sockopt (SO_LINGER, 0);
+        $self->{port} = $sock->sockport;
 
-    $sock->sockopt (SO_REUSEADDR, 1);
-    $sock->sockopt (SO_LINGER, 0);
+        while()
+        {
+             my $temp = IO::Socket::INET->new(
+                                               Proto    => 'tcp',
+                                               PeerAddr => 'localhost',
+                                               PeerPort => $self->{port}
+                                              );
+                eval{$temp->connected};
+                last unless $@;
+        }
+        $sock->close;
+    }
 
-    $self->{port} = $sock->sockport;
     $self->{port} = $config{port} if exists($config{port});
-    $sock->close;
-    undef $sock;
     $sock = IO::Socket::INET->new
                                  (
                                   LocalPort => $self->{port},
@@ -66,6 +81,7 @@ sub new
         }
         print "\n";
     }
+
     croak "Can't fork: $!" unless defined ($self->{child} = fork());
     if ($self->{child} == 0)
     {
@@ -81,9 +97,14 @@ sub new
             }
             do
             {
-                my $incoming = <$connection>;
-                my $check = crypt($self->{name}, $config{name});
-                if (substr($incoming, 0, length $check) ne $check)
+                $self->{incoming} = <$connection>;
+
+                if (!$self->valid_header)
+                {
+                    $connection->close;
+                    last;
+                }
+                if (!$self->valid_conn(\$connection))
                 {
                     $connection->close;
                     last;
@@ -94,45 +115,57 @@ sub new
                     last;
                 }
                 redo if ($self->{lock} > 0);
-
                 $self->{lock} = 1;
-                last unless verify(\@{$self->{accept}}, \$connection);
 
-                my $real_data = substr($incoming, length $check, length($incoming) - length($check));
-                if ($real_data ne "\bl\b")
+                if ($self->{incoming} ne $self->{response})
                 {
-                    $self->{data} = $real_data;
+                    $self->store_data;
                 }
                 else
                 {
-                    send_data($self, \$connection);
+                    $self->send_data(\$connection);
                 }
+
                 $self->{lock} = 0;
-                $connection->close if $connection;
+                my $ok;
+                $connection->close;
             }
         }
-        $sock->close if defined $sock;
+        $sock->close if $sock->connected;
         exit 0;
     }
-    bless ($self, $class);
+    else
+    {
+        return $self
+    }
+}
+
+sub valid_header
+{
+    my $self = shift;
+    my $valid = crypt($self->{name}, $self->{ref});
+    return if (substr($self->{incoming}, 0, length $valid) ne $valid);
+    $self->{incoming} = substr($self->{incoming}, length $valid, length($self->{incoming}) - length($valid));
+    return 1;
 }
 
 sub send_data
 {
     my ($self, $connection) = @_;
-    my $address = eval{$$connection->peerhost};
-    my $port = eval{$$connection->peerport};
+    my ($address,$port);
+    eval{$address = $$connection->peerhost};
+    eval{$port = $$connection->peerport};
     $$connection->close;
     my $sock;
+
     while()
     {
-         $sock = IO::Socket::INET->new(
+        $sock = IO::Socket::INET->new(
                                       Proto    => 'tcp',
-                                       PeerAddr => $address,
-                                       PeerPort => $port
-                                      );
-        eval{$sock->connected};
-        last unless $@;
+                                      PeerAddr => $address,
+                                      PeerPort => $port
+                                     ) or next;
+        last if $sock->connected;
     }
     $sock->autoflush(1);
 
@@ -145,9 +178,9 @@ sub send_data
         print "\tLocalport: ", $sock->sockport, "\n\n";
     }
 
-    syswrite($sock, $self->{data}, length($self->{data}));
+    my $data = $self->get_data;
+    syswrite($sock, $data, length $data);
     $sock->close;
-
 }
 
 sub destroy_variable
@@ -157,11 +190,11 @@ sub destroy_variable
     undef $self;
 }
 
-sub verify
+sub valid_conn
 {
-    my ($accept_ref, $connection) = @_;
+    my ($self, $connection) = @_;
     my $check = 0;
-    foreach my $accept (@$accept_ref)
+    foreach my $accept (@{$self->{accept}})
     {
         $check = 1 if ($accept eq $$connection->peeraddr || $accept eq $$connection->peerhost);
     }
@@ -187,6 +220,32 @@ sub port
     return $self->{port};
 }
 
+sub build_header
+{
+    my $self = shift;
+    return crypt(crypt($self->{ref},$self->{ref}),$self->{ref});
+}
+
+sub prepare_data
+{
+    my ($self,$data) = @_;
+    my $serialized_data = freeze($data);
+    return join('*',map{ord}split(//,$serialized_data));
+}
+
+sub store_data
+{
+    my $self = shift;
+    $self->{data} = $self->{incoming};
+    $self->{incoming} = '';
+}
+
+sub get_data
+{
+    my $self = shift;
+    return $self->{data};
+}
+
 sub DESTROY
 {
     my $self = shift;
@@ -194,73 +253,3 @@ sub DESTROY
 }
 
 "JAPH";
-
-__END__
-
-=pod
-
-=head1 NAME
-Net::Shared::Local
-
-=head1 DESCRIPTION
-
-C<Net::Shared::Local> is the initial class that is used to share the data; it
-is also the object that actually stores the data as well.  You'll almost
-never have to interface with C<Net::Shared::Local> objects; most interfacing will be
-done with C<Net::Shared::Handler>.  However, C<Net::Shared::Local> does provide 2
-useful methods: lock and port.  Lock functions like a file lock, and port
-returns the port number that the object is listening on.  See the methods
-section for more details.  The constructor to C<Net::Shared::Local> takes 1
-argument: a hash.  The hash can be configured to provide a number of
-options:
-
-=over 3
-
-=item C<name>
-
-The name that you will use to refer to the variable; it is the only
-required option.  It can be anything; it does not have to be the same as the
-variable itself.  However, note that if C<Net::Shared::Remote> is going to be used on
-another machine, it will have to know the name of the variable it needs in order
-to access it.
-
-=item C<access>
-
-access is an optional field used to designate which address to allow
-access to the variable.  Assign either a reference to an array or an anyonomous
-array to access.  access will default to localhost if it is not defined.
-
-=item C<port>
-
-If you really want to, you can specify which port to listen from; however,
-its probably best to let the OS pick on unless you are going to use
-C<Net::Shared::Remote> at some other Location.
-
-=item C<debug>
-
-Set to a true value to turn on debuging for the object, which makes it
-spew out all sorts of possibly useful info.
-
-=back
-
-As stated earlier, there are also 2 methods that can be called: port and
-lock.
-
-=over 3
-
-=item c<port()>
-
-Returns the port number that the Net::Shared::Local object is listening on.
-
-=item c<lock()>
-
-Works like a file lock; 0=not locked; 1=temp lock used during storage,
-and 2=completely lock.
-
-=back
-
-=head1 MORE
-
-See Net::Shared's pod for more info.
-
-=cut
